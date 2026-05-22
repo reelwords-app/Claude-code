@@ -416,7 +416,7 @@ def to_sequences(X_flat, y_flat=None, n_cases=None, t_steps=N_TIMESTEPS):
 def r_squared(y_true, y_pred):
     ss_res = np.sum((y_true - y_pred) ** 2)
     ss_tot = np.sum((y_true - np.mean(y_true)) ** 2) + 1e-10
-    return 1.0 - ss_res / ss_tot
+    return float(1.0 - ss_res / ss_tot)
 
 
 def compute_penalty(y_pred):

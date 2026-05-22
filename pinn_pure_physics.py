@@ -245,56 +245,37 @@ def build_production_model(well_id, hidden=[64, 64]):
 # 6. LOSS FUNCTIONS
 # ---------------------------------------------------------------------------
 
-@tf.function
-def buckley_leverett_residual(sat_model, x, t, Cp_norm):
+def compute_pde_residuals(sat_model, x, t, Cp_norm):
     """
-    Buckley-Leverett PDE residual:
-        φ ∂Sw/∂t + ∂f/∂x = 0
-    Enforce with automatic differentiation.
+    Compute Buckley-Leverett and polymer transport residuals in one tape pass.
+
+    Both residuals need ∂/∂x and ∂/∂t, so a single persistent inner tape
+    avoids a duplicate forward pass and fixes the None-gradient bug that
+    occurs when the input tensor is constructed outside the tape context.
     """
-    inp = tf.concat([x, t, Cp_norm], axis=1)
-    with tf.GradientTape(persistent=True) as tape:
-        tape.watch(x)
-        tape.watch(t)
-        inp_watch = tf.concat([x, t, Cp_norm], axis=1)
-        Sw = sat_model(inp_watch, training=True)
-        # Cp from normalised Cp_norm
-        Cp_ppm = Cp_norm * P.Cp_base_ppm
-        fw = fractional_flow(Sw, Cp_ppm)
-
-    dSw_dt = tape.gradient(Sw, t)
-    dfw_dx = tape.gradient(fw, x)
-    del tape
-
     phi = tf.constant(P.phi, dtype=tf.float32)
-    residual = phi * dSw_dt + dfw_dx
-    return tf.reduce_mean(tf.square(residual))
+    ads = tf.constant(P.adsorption / 1e6, dtype=tf.float32)
 
-
-@tf.function
-def polymer_transport_residual(sat_model, x, t, Cp_norm):
-    """
-    Simplified polymer transport (1D):
-        φ ∂(Sw*Cp)/∂t + ∂(fw*Cp)/∂x + adsorption_term ≈ 0
-    """
-    inp = tf.concat([x, t, Cp_norm], axis=1)
     with tf.GradientTape(persistent=True) as tape:
         tape.watch(x)
         tape.watch(t)
+        # inp MUST be built inside the tape so the dependency x,t → Sw is recorded
+        inp = tf.concat([x, t, Cp_norm], axis=1)
         Sw = sat_model(inp, training=True)
         Cp_ppm = Cp_norm * P.Cp_base_ppm
-        fw = fractional_flow(Sw, Cp_ppm)
+        fw  = fractional_flow(Sw, Cp_ppm)
         SwCp = Sw * Cp_norm
         fwCp = fw * Cp_norm
 
+    dSw_dt    = tape.gradient(Sw,   t)
+    dfw_dx    = tape.gradient(fw,   x)
     d_SwCp_dt = tape.gradient(SwCp, t)
     d_fwCp_dx = tape.gradient(fwCp, x)
     del tape
 
-    phi  = tf.constant(P.phi, dtype=tf.float32)
-    ads  = tf.constant(P.adsorption / 1e6, dtype=tf.float32)  # normalised
-    residual = phi * d_SwCp_dt + d_fwCp_dx + ads * Cp_norm
-    return tf.reduce_mean(tf.square(residual))
+    L_bl = tf.reduce_mean(tf.square(phi * dSw_dt + dfw_dx))
+    L_pt = tf.reduce_mean(tf.square(phi * d_SwCp_dt + d_fwCp_dx + ads * Cp_norm))
+    return L_bl, L_pt
 
 
 def ic_loss(sat_model, x_ic, t_ic, Cp_ic, Sw_ic_true):
@@ -372,15 +353,14 @@ def train_pinn(epochs_physics=3000, epochs_production=2000,
 
     sat_loss_history = []
     for epoch in range(epochs_physics):
-        with tf.GradientTape() as tape:
-            L_bl  = buckley_leverett_residual(sat_model, x_i, t_i, Cp_i_norm)
-            L_pt  = polymer_transport_residual(sat_model, x_i, t_i, Cp_i_norm)
+        with tf.GradientTape() as outer_tape:
+            L_bl, L_pt = compute_pde_residuals(sat_model, x_i, t_i, Cp_i_norm)
             L_ic  = ic_loss(sat_model, x_ic, t_ic, Cp_ic, Sw_ic_true)
             L_bc  = bc_loss(sat_model, x_bc, t_bc, Cp_bc, Sw_bc_true)
             # Weighted total
             L_sat = 1.0 * L_bl + 0.5 * L_pt + 10.0 * L_ic + 10.0 * L_bc
 
-        grads = tape.gradient(L_sat, sat_model.trainable_variables)
+        grads = outer_tape.gradient(L_sat, sat_model.trainable_variables)
         opt_sat.apply_gradients(zip(grads, sat_model.trainable_variables))
 
         if (epoch + 1) % 500 == 0 or epoch == 0:

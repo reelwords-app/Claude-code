@@ -160,7 +160,7 @@ class CMGViscosityLayer(layers.Layer):
                                    +  8.5 * cn ** 2
                                    +  1.3 * cn ** 3)
         # At cp_norm=0 (no polymer): mu = mu_water = 1 cp  ✓
-        # At cp_norm=0.5 (1000 ppm): mu = 1*(1+7.1+2.125+0.0625*1.3) ≈ 25 cp  ✓
+        # At cp_norm=0.5 (1000 ppm): cn=1.0, mu = 1*(1+14.2+8.5+1.3) = 25 cp  ✓
         mask   = tf.cast(cp_norm > 1e-4, tf.float32)
         mu_eff = mask * mu_poly + (1.0 - mask) * self.mu_water
         return mu_eff
@@ -461,6 +461,10 @@ def load_data(data_dir=DATA_DIR):
 
         # Polymer concentration (constant per case)
         cp_cols  = get_case_col_B(cp_df, ci)
+        if not cp_cols:
+            raise ValueError(
+                f"Polymer concentration column not found for case {ci:03d} "
+                f"in {cp_path}. Expected column name: 'case_{ci:03d}'.")
         cp_series = cp_df[cp_cols].values.astype(np.float32).flatten()
         cp_val    = float(cp_series[0])   # normalised [0, 1]
 
@@ -627,8 +631,10 @@ def train(model: PolymerPINN, sw_model: SaturationSubmodel,
             L_BC = compute_bc_loss(sw_model, N_BC)
             phys_loss = LAMBDA_R * L_BL + LAMBDA_IC * L_IC + LAMBDA_BC * L_BC
 
-        phys_grads = phys_tape.gradient(phys_loss, sw_model.trainable_variables)
-        sw_opt.apply_gradients(zip(phys_grads, sw_model.trainable_variables))
+        # Include kr_layer so Corey params are shaped by physics, not just data
+        phys_vars  = sw_model.trainable_variables + kr_layer.trainable_variables
+        phys_grads = phys_tape.gradient(phys_loss, phys_vars)
+        sw_opt.apply_gradients(zip(phys_grads, phys_vars))
 
         # ── Step 2: Data update ────────────────────────────────────────────
         epoch_data_loss = 0.0
@@ -680,11 +686,7 @@ def train(model: PolymerPINN, sw_model: SaturationSubmodel,
     if os.path.exists(best_w_path):
         model.load_weights(best_w_path)
 
-    sw_save_path = os.path.join(OUTPUT_DIR, 'pinn_polymer_sw_submodel.keras')
-    try:
-        sw_model.save(sw_save_path)
-    except Exception:
-        sw_model.save_weights(os.path.join(OUTPUT_DIR, 'sw_submodel.weights.h5'))
+    sw_model.save_weights(os.path.join(OUTPUT_DIR, 'sw_submodel.weights.h5'))
 
     hist_path = os.path.join(OUTPUT_DIR, 'pinn_polymer_history.json')
     with open(hist_path, 'w') as f:

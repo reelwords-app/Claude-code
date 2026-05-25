@@ -64,105 +64,176 @@ def _clip_poly(poly, xmin, xmax, ymin, ymax):
 # Figure 9 — Voronoi diagram  (ref style: Fig 2 / Fig 3)
 # ─────────────────────────────────────────────────────────────────────────────
 def make_fig9():
-    # Pelican Lake line-drive: 2 injectors, 9 producers
-    INJS = np.array([[250, 150], [250, 450]], dtype=float)
-    PRDS = np.array([
-        [ 80, 75], [ 80, 225], [ 80, 375], [ 80, 525],
-        [420, 75], [420, 225], [420, 375], [420, 525],
-        [250, 600],
-    ], dtype=float)
-    BX, BY = 500, 650
+    """
+    Pelican Lake HP-6 pilot: 5 horizontal wells (P1-I1-P2-I2-P3), each 4593.176 ft = 1400 m long,
+    spaced 574.147 ft = 175 m apart in X. Grid: 157 × 10 × 3 cells.
+    DY: 1148 ft buffer + 8×574 ft (well region) + 1148 ft buffer = 2100 m total.
+    Reference: Ugembe et al., Manuscript_final.pdf, Section 2.2.
+    """
+    # Dimensions in metres (1 ft = 0.3048 m)
+    WELL_LEN  = 4593.176 * 0.3048   # ≈ 1400 m  — horizontal well length (Y direction)
+    SPACING   = 574.147  * 0.3048   # ≈ 175 m   — inter-well spacing (X direction)
+    BUF_Y     = 1148.294 * 0.3048   # ≈ 350 m   — Y buffer beyond well ends
+    BUF_X     = 1.5 * SPACING       # ≈ 262 m   — X buffer beyond outermost wells
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+    # Total field extents
+    # X: 4 gaps × 175 m + 2 × 262 m buffer
+    # Y: well_len + 2 × buffer
+    BY_start  = 0.0
+    BY_end    = BUF_Y + WELL_LEN + BUF_Y   # ≈ 2100 m
+    BX_start  = -BUF_X
+    BX_end    = 4 * SPACING + BUF_X        # 4 gaps × 175 m + buffer ≈ 962 m
+
+    # Well centre-lines: X positions of each horizontal well
+    # Layout (line-drive): P1 – I1 – P2 – I2 – P3
+    well_x    = np.array([0, 1, 2, 3, 4]) * SPACING   # 0, 175, 350, 525, 700 m
+    well_types= ['P', 'I', 'P', 'I', 'P']             # producer / injector
+    well_names= ['P1','I1','P2','I2','P3']
+    Y0        = BUF_Y                                   # well start in Y
+    Y1        = BUF_Y + WELL_LEN                        # well end in Y
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
 
     # ── Panel (a): Fine-Grid Reservoir Model ────────────────────────────────
     ax = axes[0]
-    ax.set_facecolor('#f8f8ff')
-    nx, ny = 25, 32
-    for x in np.linspace(0, BX, nx+1):
-        ax.plot([x,x],[0,BY], color='#cccccc', lw=0.45, zorder=1)
-    for y in np.linspace(0, BY, ny+1):
-        ax.plot([0,BX],[y,y], color='#cccccc', lw=0.45, zorder=1)
+    ax.set_facecolor('#f0f4ff')
 
-    for i,(ix,iy) in enumerate(INJS):
-        ax.scatter(ix, iy, s=220, marker='s', color='#d32f2f', zorder=6, linewidths=0)
-        ax.text(ix+12, iy+10, f'I{i+1}', fontsize=9.5, color='#b71c1c', fontweight='bold', zorder=7)
-    for i,(px,py) in enumerate(PRDS):
-        ax.scatter(px, py, s=130, marker='o', color='#212121', zorder=6, linewidths=0)
-        ax.text(px+12, py+8, f'P{i+1}', fontsize=9, color='#212121', zorder=7)
+    # Simplified grid: 40 cols × 22 rows (representing 157 × 10 cells)
+    nx_show, ny_show = 40, 22
+    xs = np.linspace(BX_start, BX_end, nx_show + 1)
+    ys = np.linspace(BY_start, BY_end, ny_show + 1)
+    for x in xs:
+        ax.plot([x, x], [BY_start, BY_end], color='#c5cae9', lw=0.4, zorder=1)
+    for y in ys:
+        ax.plot([BX_start, BX_end], [y, y], color='#c5cae9', lw=0.4, zorder=1)
 
-    ax.set_xlim(-15, BX+30); ax.set_ylim(-15, BY+40)
-    ax.set_aspect('equal')
+    # Draw horizontal wells as thick lines
+    for wx, wt, wn in zip(well_x, well_types, well_names):
+        col = '#d32f2f' if wt == 'I' else '#1565c0'
+        lw  = 3.5 if wt == 'I' else 3.0
+        ax.plot([wx, wx], [Y0, Y1], color=col, lw=lw, solid_capstyle='round', zorder=5)
+        ax.text(wx + 8, Y1 + 18, wn, ha='center', fontsize=9.5,
+                color=col, fontweight='bold', zorder=6)
+
+    # Permeability colour gradient (schematic)
+    from matplotlib.colors import LinearSegmentedColormap
+    cmap = LinearSegmentedColormap.from_list('perm',
+               ['#1a237e', '#1565c0', '#4caf50', '#ff9800', '#b71c1c'])
+    np.random.seed(42)
+    perm = np.random.rand(ny_show, nx_show) * 0.6 + 0.2
+    ax.imshow(perm, extent=[BX_start, BX_end, BY_start, BY_end],
+              origin='lower', cmap=cmap, alpha=0.30, aspect='auto', zorder=0)
+
+    ax.set_xlim(BX_start - 20, BX_end + 20)
+    ax.set_ylim(BY_start - 30, BY_end + 60)
     ax.set_xlabel('X (m)', fontsize=11); ax.set_ylabel('Y (m)', fontsize=11)
-    ax.set_title('(a)  Fine-Grid Reservoir Model', fontsize=12, fontweight='bold', pad=8)
-    for spine in ax.spines.values(): spine.set_edgecolor('#aaaaaa')
+    ax.set_title('(a)  Fine-Grid Reservoir Model\n'
+                 '(157 × 10 × 3 cells, 3 layers)', fontsize=11, fontweight='bold', pad=6)
+    ax.set_aspect('equal')
 
     # ── Panel (b): Voronoi-Diagram Model ────────────────────────────────────
     ax2 = axes[1]
-    ax2.set_facecolor('#f8f8ff')
+    ax2.set_facecolor('#fafafa')
 
-    m = 350
-    all_pts = np.vstack([INJS, PRDS])
-    mirrors = np.array([[p[0]+dx, p[1]+dy]
-                         for p in all_pts
-                         for dx, dy in [(-2*m,0),(2*m,0),(0,-2*m),(0,2*m)]])
-    vor = Voronoi(np.vstack([all_pts, mirrors]))
+    # For horizontal wells, sample N_PT points along each well
+    N_PT = 30
+    y_pts = np.linspace(Y0, Y1, N_PT)
 
+    all_pts  = np.array([[wx, yp] for wx in well_x for yp in y_pts])
+    # which original well does each sampled point belong to?
+    well_idx = np.array([i for i, wx in enumerate(well_x) for _ in y_pts])
+
+    # Mirror points to bound the Voronoi
+    m = max(BX_end - BX_start, BY_end - BY_start)
+    mirrors = []
+    for pt in all_pts:
+        for dx, dy in [(-2*m, 0), (2*m, 0), (0, -2*m), (0, 2*m)]:
+            mirrors.append([pt[0]+dx, pt[1]+dy])
+    extended = np.vstack([all_pts, mirrors])
+    vor = Voronoi(extended)
+
+    # Colours per well type
+    fcols = {'P': '#dceefb', 'I': '#e8f5e9'}
+    ecols = {'P': '#1565c0', 'I': '#2e7d32'}
+
+    drawn_regions = set()
     for k in range(len(all_pts)):
+        wi = well_idx[k]
+        wt = well_types[wi]
         reg = vor.regions[vor.point_region[k]]
-        if -1 in reg or not reg: continue
+        if -1 in reg or not reg or id(tuple(reg)) in drawn_regions: continue
+        drawn_regions.add(id(tuple(reg)))
         pts = vor.vertices[reg]
-        clipped = _clip_poly(pts, 0, BX, 0, BY)
+        clipped = _clip_poly(pts, BX_start, BX_end, BY_start, BY_end)
         if len(clipped) < 3: continue
-        fc = '#d0e8f8' if k < len(INJS) else '#fffde7'
         ax2.add_patch(plt.Polygon(clipped, closed=True,
-                                  facecolor=fc, edgecolor='#888888',
-                                  lw=0.9, alpha=0.9, zorder=1))
+                                  facecolor=fcols[wt], edgecolor='#aaaaaa',
+                                  lw=0.6, alpha=0.85, zorder=1))
 
-    # Delaunay (inter-well connections)
-    tri = Delaunay(all_pts)
-    drawn = set()
-    for s in tri.simplices:
-        for i in range(3):
-            e = tuple(sorted([s[i], s[(i+1)%3]]))
-            if e not in drawn:
-                drawn.add(e)
-                p1, p2 = all_pts[e[0]], all_pts[e[1]]
-                ax2.plot([p1[0],p2[0]], [p1[1],p2[1]],
-                         '-', color='#c62828', lw=1.3, alpha=0.85, zorder=3)
+    # Draw thick Voronoi boundary lines between wells (at X midpoints)
+    for i in range(len(well_x) - 1):
+        xb = (well_x[i] + well_x[i+1]) / 2
+        ax2.plot([xb, xb], [BY_start, BY_end],
+                 color='#555555', lw=1.2, ls='--', zorder=3, alpha=0.7)
 
-    ax2.add_patch(plt.Polygon([[0,0],[BX,0],[BX,BY],[0,BY]],
-                               closed=True, fill=False,
-                               edgecolor='#222222', lw=2, zorder=5))
+    # Draw well connections (Delaunay-style — adjacent wells connected)
+    for i in range(len(well_x) - 1):
+        ymid = (Y0 + Y1) / 2
+        ax2.annotate('', xy=(well_x[i+1], ymid), xytext=(well_x[i], ymid),
+                     arrowprops=dict(arrowstyle='->', color='#c62828', lw=1.8),
+                     zorder=4)
 
-    for i,(ix,iy) in enumerate(INJS):
-        ax2.scatter(ix, iy, s=220, marker='s', color='#d32f2f', zorder=8, linewidths=0)
-        ax2.text(ix+12, iy+10, f'I{i+1}', fontsize=9.5, color='#b71c1c', fontweight='bold', zorder=9)
-    for i,(px,py) in enumerate(PRDS):
-        ax2.scatter(px, py, s=130, marker='o', color='#212121', zorder=8, linewidths=0)
-        ax2.text(px+12, py+8, f'P{i+1}', fontsize=9, color='#212121', zorder=9)
+    # Field boundary
+    ax2.add_patch(plt.Polygon(
+        [[BX_start, BY_start],[BX_end, BY_start],
+         [BX_end, BY_end],[BX_start, BY_end]],
+        closed=True, fill=False, edgecolor='#222222', lw=2, zorder=5))
 
-    ax2.set_xlim(-15, BX+30); ax2.set_ylim(-15, BY+40)
-    ax2.set_aspect('equal')
+    # Draw horizontal wells
+    for wx, wt, wn in zip(well_x, well_types, well_names):
+        col = '#d32f2f' if wt == 'I' else '#1565c0'
+        mk  = 's' if wt == 'I' else 'o'
+        lw  = 3.5 if wt == 'I' else 3.0
+        ax2.plot([wx, wx], [Y0, Y1], color=col, lw=lw,
+                 solid_capstyle='round', zorder=6)
+        # midpoint marker
+        ymid = (Y0 + Y1) / 2
+        ax2.scatter(wx, ymid, s=80, marker=mk, color=col, zorder=8,
+                    edgecolors='white', linewidths=1.2)
+        ax2.text(wx + 8, Y1 + 18, wn, ha='center', fontsize=9.5,
+                 color=col, fontweight='bold', zorder=9)
+
+    # T_i,j label on a connection arrow
+    ymid = (Y0 + Y1) / 2
+    ax2.text((well_x[0]+well_x[1])/2, ymid + 20, '$T_{i,j}$',
+             ha='center', fontsize=10, color='#c62828', fontweight='bold', zorder=7)
+
+    ax2.set_xlim(BX_start - 20, BX_end + 20)
+    ax2.set_ylim(BY_start - 30, BY_end + 60)
     ax2.set_xlabel('X (m)', fontsize=11); ax2.set_ylabel('Y (m)', fontsize=11)
-    ax2.set_title('(b)  Voronoi-Diagram Model', fontsize=12, fontweight='bold', pad=8)
-    for spine in ax2.spines.values(): spine.set_edgecolor('#aaaaaa')
+    ax2.set_title('(b)  Voronoi-Diagram Model\n'
+                  '(5 regions: P1–I1–P2–I2–P3)', fontsize=11, fontweight='bold', pad=6)
+    ax2.set_aspect('equal')
+
+    # Annotations: well specs
+    ax2.text(BX_end - 10, BY_start + 30,
+             f'Well length: {WELL_LEN:.0f} m\nSpacing: {SPACING:.0f} m',
+             ha='right', fontsize=8.5, color='#333333',
+             bbox=dict(boxstyle='round', fc='white', ec='#aaaaaa', lw=1), zorder=9)
 
     legend_handles = [
-        mpatches.Patch(facecolor='#d0e8f8', edgecolor='#888888', label='Injector Voronoi cell'),
-        mpatches.Patch(facecolor='#fffde7', edgecolor='#888888', label='Producer Voronoi cell'),
-        Line2D([0],[0], color='#c62828', lw=1.5, label='Delaunay connections'),
-        Line2D([0],[0], color='#888888', lw=0.9, label='Voronoi boundaries'),
-        Line2D([0],[0], marker='s', color='w', markerfacecolor='#d32f2f',
-               markersize=10, label='Injector well'),
-        Line2D([0],[0], marker='o', color='w', markerfacecolor='#212121',
-               markersize=9, label='Producer well'),
+        mpatches.Patch(facecolor='#e8f5e9', edgecolor='#aaaaaa', label='Injector Voronoi region'),
+        mpatches.Patch(facecolor='#dceefb', edgecolor='#aaaaaa', label='Producer Voronoi region'),
+        Line2D([0],[0], color='#d32f2f', lw=3, label='Injector well (horiz.)'),
+        Line2D([0],[0], color='#1565c0', lw=3, label='Producer well (horiz.)'),
+        Line2D([0],[0], color='#c62828', lw=1.8, label='Inter-well connection ($T_{i,j}$)'),
+        Line2D([0],[0], color='#555555', lw=1.2, ls='--', label='Voronoi boundary'),
     ]
-    ax2.legend(handles=legend_handles, loc='upper right',
-               fontsize=8.5, facecolor='white', framealpha=0.92, edgecolor='#aaaaaa')
+    ax2.legend(handles=legend_handles, loc='lower right',
+               fontsize=8, facecolor='white', framealpha=0.95, edgecolor='#aaaaaa')
 
-    fig.suptitle('Pelican Lake Polymer Flood — Reservoir Grid Models\n'
-                 '(Line-drive pattern: 2 injectors × 9 producers)',
+    fig.suptitle('Pelican Lake HP-6 Pilot — Reservoir Grid Models\n'
+                 '(5 horizontal wells: P1–I1–P2–I2–P3, well spacing = 175 m)',
                  fontsize=13, fontweight='bold', y=1.01)
     fig.tight_layout()
     save(fig, 'fig9_voronoi.png')

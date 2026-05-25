@@ -615,3 +615,12 @@ print(f'    NN   optimal: day {opt_nn_ps_2d},  Cp = {opt_nn_cp_2d:.0f} ppm')
 print(f'    PINN optimal: day {opt_pinn_ps_2d}, Cp = {opt_pinn_cp_2d:.0f} ppm')
 print(f'  Figures (8) → {OUT_DIR}')
 print('='*70)
+
+# ── Architecture figures (Voronoi, PINN structure, network, equations) ──────
+print('\n[ARCH ] Generating architecture figures ...')
+from generate_architecture_figures import make_fig9, make_fig10, make_fig11, make_fig12
+make_fig9()
+make_fig10()
+make_fig11()
+make_fig12()
+print(f'  Figures (12) → {OUT_DIR}')

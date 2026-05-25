@@ -72,7 +72,7 @@ q_norm   = q_total / Q_MAX
 OIL_MAX  = max(float(op_agg[c].max()) for c in cases)
 t_days   = np.arange(N_T, dtype=np.float32) / T_MAX
 
-print(f'[DATA] {len(cases)} cases, {N_T} timesteps, OIL_MAX={OIL_MAX:.1f} m³/d')
+print(f'[DATA] {len(cases)} cases, {N_T} timesteps, OIL_MAX={OIL_MAX:.1f} bbl/day')
 
 # Build arrays for all cases
 X_all, Y_all, cid_all = [], [], []
@@ -251,39 +251,26 @@ def save(fig, name):
     fig.savefig(os.path.join(OUT_DIR, name), dpi=150, bbox_inches='tight')
     plt.close(fig); print(f'  [PLOT] {name}')
 
-# ── Fig 1: Loss curves ──────────────────────────────────────
-fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
-ep_tr  = np.arange(1, EPOCHS+1)
-ep_te  = np.arange(10, EPOCHS+1, 10)
-if ep_te[-1] != EPOCHS: ep_te = np.append(ep_te, EPOCHS)
-ep_te  = ep_te[:len(nn_te)]   # match actual length
-
-for ax, tr_nn, tr_pinn, te_nn, te_pinn, title in [
-    (axes[0], nn_tr, pn_tr, None, None, 'Training Loss (MSE)'),
-    (axes[1], None,  None,  nn_te, pn_te, 'Validation Loss — last 25% forecast'),
+# ── Fig 1: Loss curves (reference style: train+test same panel) ─────
+fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+for ax, tr, te, title in [
+    (axes[0], nn_tr, nn_te, 'Pure Data-driven Model'),
+    (axes[1], pn_tr, pn_te, 'Proposed PINN Model'),
 ]:
-    if tr_nn is not None:
-        ax.semilogy(ep_tr, tr_nn,   lw=2, color=C['NN'],   label='Pure NN')
-        ax.semilogy(ep_tr, tr_pinn, lw=2, color=C['PINN'], label='PINN', ls='--')
-        best_nn, best_pinn = tr_nn.min(), tr_pinn.min()
-        ax.scatter([np.argmin(tr_nn)+1, np.argmin(tr_pinn)+1],
-                   [best_nn, best_pinn], s=60, zorder=6, color=[C['NN'], C['PINN']])
-        ax.text(0.55, 0.80, f'NN best:   {best_nn:.5f}\nPINN best: {best_pinn:.5f}',
-                transform=ax.transAxes, fontsize=9,
-                bbox=dict(boxstyle='round', fc='white', alpha=0.7))
-    else:
-        _ep_te2 = ep_te[:len(te_nn)]
-        ax.semilogy(_ep_te2, te_nn,   lw=2, color=C['NN'],   label='Pure NN')
-        ax.semilogy(_ep_te2[:len(te_pinn)], te_pinn, lw=2, color=C['PINN'], label='PINN', ls='--')
-        best_nn, best_pinn = te_nn.min(), te_pinn.min()
-        ax.scatter([_ep_te2[np.argmin(te_nn)], _ep_te2[:len(te_pinn)][np.argmin(te_pinn)]],
-                   [best_nn, best_pinn], s=60, zorder=6, color=[C['NN'], C['PINN']])
-        ax.text(0.55, 0.80, f'NN best:   {best_nn:.5f}\nPINN best: {best_pinn:.5f}',
-                transform=ax.transAxes, fontsize=9,
-                bbox=dict(boxstyle='round', fc='white', alpha=0.7))
-    ax.set_title(title); ax.set_xlabel('Epoch'); ax.set_ylabel('MSE'); ax.legend()
-fig.suptitle('NN vs PINN — Training and Validation Loss Curves\n'
-             'Pelican Lake CMG Polymer Flood (Temporal holdout: last 25%)', fontsize=12)
+    ep_tr_ax = np.arange(1, EPOCHS+1)
+    ep_te_ax = np.arange(10, EPOCHS+1, 10)
+    if len(ep_te_ax) < len(te):
+        ep_te_ax = np.append(ep_te_ax, EPOCHS)
+    ep_te_ax = ep_te_ax[:len(te)]
+    ax.semilogy(ep_tr_ax, tr, lw=1.5, color='#2196F3', label='Train')
+    ax.semilogy(ep_te_ax, te, lw=1.5, color='#F44336', label='Test', alpha=0.85)
+    ax.set_xlabel('Epoch', fontsize=11)
+    ax.set_ylabel('Loss', fontsize=11)
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.legend(fontsize=10)
+    ax.grid(True, which='both', alpha=0.3)
+    ax.set_facecolor('white')
+fig.suptitle('Training and Test Losses — NN vs PINN\nPelican Lake CMG STARS Polymer Flood', fontsize=12)
 fig.tight_layout(); save(fig, 'fig1_loss_curves.png')
 
 # ── Fig 2: WC predictions (4 cases) ─────────────────────────
@@ -338,7 +325,7 @@ for ax, c in zip(axes, sel):
     ax.plot(years, oil_pinn,  color=C['PINN'],lw=2,   ls=':',
             label=f'PINN forecast R²={r2_pinn_te:.3f}')
     ax.set_title(f'{c}  (poly start day {int(ps*T_MAX)})')
-    ax.set_xlabel('Time (years)'); ax.set_ylabel('Oil Rate (m³/day)')
+    ax.set_xlabel('Time (years)'); ax.set_ylabel('Oil Rate (bbl/day)')
     ax.legend(fontsize=8)
 
 fig.suptitle('Oil Production Rate — NN vs PINN vs CMG STARS\nShaded = forecast period', fontsize=12)
@@ -384,27 +371,58 @@ for bar, val in list(zip(bars_nn2, [nn_v[i] for i in err_idx])) + \
 fig.suptitle('NN vs PINN Statistical Performance — Forecast Period (last 25%)\nPelican Lake CMG STARS Polymer Flood', fontsize=12)
 fig.tight_layout(); save(fig, 'fig4_metrics.png')
 
-# ── Fig 5: Scatter plots ─────────────────────────────────────
-fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-for row, (model, lbl, col) in enumerate([(nn,'NN',C['NN']),(pinn,'PINN',C['PINN'])]):
-    pred = model(tf.constant(X_te), training=False).numpy()
-    for col_i, (true_col, pred_col, xlabel, ylabel, title) in enumerate([
-        (Y_te[:,0], pred[:,0], 'CMG WC', 'Predicted WC', 'Water Cut'),
-        (Y_te[:,1]*OIL_MAX, pred[:,1]*OIL_MAX,
-         'CMG Oil (m³/d)', 'Predicted Oil (m³/d)', 'Oil Rate'),
-    ]):
-        ax = axes[row, col_i]
-        ax.scatter(true_col, pred_col, s=1.5, alpha=0.2, color=col, rasterized=True)
-        lo, hi = true_col.min(), true_col.max()
-        ax.plot([lo,hi],[lo,hi],'k--',lw=1.5)
-        r2v = r2_score(true_col, pred_col)
-        rmse = np.sqrt(mean_squared_error(true_col, pred_col))
-        ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
-        ax.set_title(f'{lbl} — {title}')
-        ax.text(0.04, 0.90, f'R² = {r2v:.4f}\nRMSE = {rmse:.4f}',
-                transform=ax.transAxes, fontsize=10, color=col, fontweight='bold',
-                bbox=dict(boxstyle='round', fc='white', alpha=0.8))
-fig.suptitle('Predicted vs Actual — NN vs PINN (Forecast Period)\nPelican Lake CMG', fontsize=12)
+# ── Fig 5: Predicted vs Actual Cumulative Oil per case ──────────────
+# Compute per-case cumulative oil (bbl) for training and test periods
+cum_act_tr, cum_act_te = [], []
+cum_nn_tr_c, cum_nn_te_c = [], []
+cum_pinn_tr_c, cum_pinn_te_c = [], []
+
+for c in cases:
+    ps  = poly_starts[c]
+    Xc  = np.column_stack([t_days, np.full(N_T, ps, np.float32), q_norm]).astype(np.float32)
+    oil_act  = op_agg[c].values[:N_T]
+    oil_nn_p = nn(tf.constant(Xc),   training=False).numpy()[:,1] * OIL_MAX
+    oil_pi_p = pinn(tf.constant(Xc), training=False).numpy()[:,1] * OIL_MAX
+    for lst_a, lst_n, lst_p, sl in [
+        (cum_act_tr, cum_nn_tr_c, cum_pinn_tr_c, slice(None, SPLIT)),
+        (cum_act_te, cum_nn_te_c, cum_pinn_te_c, slice(SPLIT, None)),
+    ]:
+        lst_a.append(np.trapezoid(oil_act[sl],   t_days[sl]) * T_MAX)
+        lst_n.append(np.trapezoid(oil_nn_p[sl],  t_days[sl]) * T_MAX)
+        lst_p.append(np.trapezoid(oil_pi_p[sl],  t_days[sl]) * T_MAX)
+
+cum_act_tr  = np.array(cum_act_tr);  cum_act_te  = np.array(cum_act_te)
+cum_nn_tr_c = np.array(cum_nn_tr_c); cum_nn_te_c = np.array(cum_nn_te_c)
+cum_pi_tr_c = np.array(cum_pinn_tr_c); cum_pi_te_c = np.array(cum_pinn_te_c)
+
+def corr(a, b): return float(np.corrcoef(a, b)[0,1])
+r_nn_tr  = corr(cum_act_tr, cum_nn_tr_c);  r_nn_te  = corr(cum_act_te, cum_nn_te_c)
+r_pi_tr  = corr(cum_act_tr, cum_pi_tr_c);  r_pi_te  = corr(cum_act_te, cum_pi_te_c)
+
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+for ax, act_tr, pred_tr, act_te, pred_te, r_tr, r_te, title, col in [
+    (axes[0], cum_act_tr, cum_nn_tr_c, cum_act_te, cum_nn_te_c,
+     r_nn_tr, r_nn_te, 'Pure Data-driven Model', C['NN']),
+    (axes[1], cum_act_tr, cum_pi_tr_c, cum_act_te, cum_pi_te_c,
+     r_pi_tr, r_pi_te, 'Proposed PINN Model', C['PINN']),
+]:
+    ax.scatter(act_tr/1e6, pred_tr/1e6, s=55, alpha=0.85, color='#2196F3',
+               label='Train', edgecolors='white', linewidths=0.4, zorder=4)
+    ax.scatter(act_te/1e6, pred_te/1e6, s=55, alpha=0.85, color='#FF9800',
+               label='Test (Forecast)', edgecolors='white', linewidths=0.4, zorder=4)
+    lo = min(np.concatenate([act_tr, act_te]).min(), np.concatenate([pred_tr, pred_te]).min())/1e6
+    hi = max(np.concatenate([act_tr, act_te]).max(), np.concatenate([pred_tr, pred_te]).max())/1e6
+    ax.plot([lo, hi], [lo, hi], 'k--', lw=1.5, zorder=3)
+    ax.text(0.04, 0.92,
+            f'r: {r_tr:.2f} (Train)\n   {r_te:.2f} (Test)',
+            transform=ax.transAxes, fontsize=10, va='top',
+            bbox=dict(boxstyle='round', fc='white', alpha=0.8))
+    ax.set_xlabel('Real Cumulative Oil Production (×10⁶ bbl)', fontsize=11)
+    ax.set_ylabel('Predicted Cumulative Oil Production (×10⁶ bbl)', fontsize=11)
+    ax.set_title(title, fontsize=12, fontweight='bold')
+    ax.legend(fontsize=9, loc='lower right')
+    ax.grid(alpha=0.3)
+fig.suptitle('Predicted vs. Actual Cumulative Oil Production — Per Case\nPelican Lake CMG STARS', fontsize=12)
 fig.tight_layout(); save(fig, 'fig5_scatter.png')
 
 # ── Fig 6: Optimization ──────────────────────────────────────
@@ -419,7 +437,7 @@ ax.scatter([opt_day_pinn], [cum_pinn.max()/1e6], s=100, color=C['PINN'], zorder=
            label=f'PINN opt: day {opt_day_pinn}')
 ax.axvline(opt_day_nn,   color=C['NN'],   ls=':', lw=1.5)
 ax.axvline(opt_day_pinn, color=C['PINN'], ls=':', lw=1.5)
-ax.set_xlabel('Polymer Injection Start Day'); ax.set_ylabel('Cumulative Oil (×10⁶ m³·day)')
+ax.set_xlabel('Polymer Injection Start Day'); ax.set_ylabel('Cumulative Oil (×10⁶ bbl·day)')
 ax.set_title('Cumulative Oil Recovery vs Polymer Start Timing'); ax.legend()
 
 ax2 = axes[1]
@@ -556,7 +574,7 @@ for ax, data, lbl, opt_ps, opt_cp, cmap in [
     cf = ax.contourf(days_2d, scan_cp_2d, data, levels=25, cmap=cmap)
     ax.contour( days_2d, scan_cp_2d, data, levels=12,
                 colors='k', alpha=0.25, linewidths=0.5)
-    plt.colorbar(cf, ax=ax, label='Cum. Oil (×10⁶ m³·day)')
+    plt.colorbar(cf, ax=ax, label='Cum. Oil (×10⁶ bbl·day)')
     ax.scatter([opt_ps], [opt_cp], s=280, marker='*', color='white',
                edgecolors='black', linewidths=1.5, zorder=10,
                label=f'Optimal\nday {opt_ps}, {opt_cp:.0f} ppm')

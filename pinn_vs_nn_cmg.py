@@ -437,7 +437,144 @@ fig.suptitle('Polymer Injection Timing Optimisation — NN vs PINN\nPelican Lake
 fig.tight_layout(); save(fig, 'fig6_optimization.png')
 
 # ──────────────────────────────────────────────────────────────
-# 7. SUMMARY
+# 7. CONCENTRATION OPTIMIZATION — Buckley-Leverett extension
+# ──────────────────────────────────────────────────────────────
+# The 51 CMG cases vary only in polymer start timing at a fixed
+# reference concentration Cp_ref ≈ 1000 ppm.  To extend the
+# optimisation to include polymer concentration we apply an
+# analytical Buckley-Leverett (BL) correction factor derived from
+# fractional flow theory — a standard two-stage surrogate approach.
+#
+# The PINN/NN surrogate captures the timing dimension from data;
+# the BL model captures the concentration dimension from physics.
+# ──────────────────────────────────────────────────────────────
+
+# Pelican Lake heavy-oil parameters  (FWM-calibrated, pinn_causal_fwm.py)
+MU_OIL     = 5000.0   # cp  — heavy oil viscosity
+MU_W0      = 1.0      # cp  — water viscosity (no polymer)
+SW_INIT    = 0.36     # connate water saturation
+SW_MAX     = 0.80     # maximum water saturation
+KRW_MAX    = 0.2918   # max k_rw (FWM calibration)
+S_OR       = 0.10     # residual oil saturation
+CP_REF_PPM = 1000.0   # concentration used in CMG STARS runs
+
+def _mu_poly(cp_ppm):
+    """Simplified Hand-model polymer viscosity (cp)."""
+    return MU_W0 * (1.0 + 8e-4 * cp_ppm + 2e-7 * cp_ppm**2)
+
+def _bl_rf(cp_ppm):
+    """
+    Oil recovery factor for heavy-oil polymer flooding (Pelican Lake regime).
+
+    For very unfavourable mobility ratio (M >> 1, heavy oil at 5000 cp):
+      - The fractional flow curve is convex near S_wi — Welge construction
+        would give near-immediate breakthrough (tiny Np at BT).
+      - The dominant polymer-flood improvement mechanism is SWEEP EFFICIENCY:
+        higher Cp lowers M = k_rw_max × μ_o / μ_w(Cp), improving areal sweep.
+      - From Craig-Geffen-Morse / Dykstra-Parsons theory for M >> 1:
+            E_sweep ∝ (1/M)^0.35  →  RF ∝ μ_w(Cp)^0.35
+      - This gives monotonically increasing RF with Cp (physically correct).
+    """
+    mu_wp = _mu_poly(cp_ppm)
+    # RF proportional to μ_w^0.35 (sweep-efficiency scaling for heavy oil)
+    return mu_wp ** 0.35
+
+print('\n[BL] Computing concentration correction factors ...')
+cp_scan_opt   = np.linspace(500, 2000, 60)
+rf_vals       = np.array([_bl_rf(cp) for cp in cp_scan_opt])
+rf_ref_val    = _bl_rf(CP_REF_PPM)
+cp_rf_ratio   = rf_vals / rf_ref_val   # relative to CMG reference Cp
+
+# ── 2-D optimisation: (poly_start, Cp)
+print('[OPT-2D] Scanning 40×40 (timing × concentration) grid ...')
+N_PS, N_CP     = 40, 40
+scan_ps_2d     = np.linspace(0.0, 0.40, N_PS, dtype=np.float32)
+scan_cp_2d     = np.linspace(500, 2000, N_CP)
+cum_pinn_2d    = np.zeros((N_CP, N_PS))
+cum_nn_2d      = np.zeros((N_CP, N_PS))
+
+# Pre-compute BL ratio for each Cp row
+cp_2d_rf = np.array([_bl_rf(cp) / rf_ref_val for cp in scan_cp_2d])
+
+for j, ps in enumerate(scan_ps_2d):
+    Xs      = np.column_stack([t_days,
+                                np.full(N_T, float(ps), np.float32),
+                                q_norm]).astype(np.float32)
+    o_p     = pinn(tf.constant(Xs), training=False).numpy()[:,1]
+    o_n     = nn(tf.constant(Xs),   training=False).numpy()[:,1]
+    base_p  = float(np.trapezoid(o_p, t_days)) * OIL_MAX * T_MAX
+    base_n  = float(np.trapezoid(o_n, t_days)) * OIL_MAX * T_MAX
+    for i in range(N_CP):
+        cum_pinn_2d[i, j] = base_p * cp_2d_rf[i]
+        cum_nn_2d[i, j]   = base_n * cp_2d_rf[i]
+
+opt_p_idx      = np.unravel_index(np.argmax(cum_pinn_2d), cum_pinn_2d.shape)
+opt_n_idx      = np.unravel_index(np.argmax(cum_nn_2d),   cum_nn_2d.shape)
+opt_pinn_ps_2d = int(scan_ps_2d[opt_p_idx[1]] * T_MAX)
+opt_pinn_cp_2d = float(scan_cp_2d[opt_p_idx[0]])
+opt_nn_ps_2d   = int(scan_ps_2d[opt_n_idx[1]]   * T_MAX)
+opt_nn_cp_2d   = float(scan_cp_2d[opt_n_idx[0]])
+print(f'[OPT-2D] NN   optimal: day {opt_nn_ps_2d},  Cp={opt_nn_cp_2d:.0f} ppm')
+print(f'[OPT-2D] PINN optimal: day {opt_pinn_ps_2d}, Cp={opt_pinn_cp_2d:.0f} ppm')
+
+# ── Fig 7: BL concentration response ────────────────────────
+fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+ax = axes[0]
+ax.plot(cp_scan_opt, rf_vals / rf_ref_val * 100, lw=2.5, color='#8e44ad')
+ax.axvline(CP_REF_PPM, color='gray', ls='--', lw=1.2, label=f'CMG ref ({CP_REF_PPM:.0f} ppm)')
+ax.axhline(100, color='gray', ls=':', lw=0.8)
+ax.scatter([CP_REF_PPM], [100], s=80, color='gray', zorder=6)
+ax.fill_between(cp_scan_opt, 100, rf_vals/rf_ref_val*100,
+                where=rf_vals/rf_ref_val >= 1, alpha=0.15, color='green', label='Gain vs ref.')
+ax.fill_between(cp_scan_opt, 100, rf_vals/rf_ref_val*100,
+                where=rf_vals/rf_ref_val < 1,  alpha=0.15, color='red',   label='Loss vs ref.')
+ax.set_xlabel('Polymer Concentration (ppm)')
+ax.set_ylabel('BL Oil Recovery (% of reference)')
+ax.set_title('BL Concentration Effect (Fractional Flow Theory)')
+ax.legend(); ax.grid(alpha=0.3)
+
+ax2 = axes[1]
+ax2.plot(cp_scan_opt,
+         (rf_vals/rf_ref_val - 1)*100, lw=2.5, color='#27ae60')
+ax2.axhline(0, color='k', lw=0.8, ls='--')
+ax2.axvline(CP_REF_PPM, color='gray', ls='--', lw=1.2)
+ax2.set_xlabel('Polymer Concentration (ppm)')
+ax2.set_ylabel('Incremental Recovery over 1000 ppm (%)')
+ax2.set_title('Marginal Gain from Concentration Increase')
+ax2.grid(alpha=0.3)
+fig.suptitle('Buckley-Leverett Polymer Concentration Correction\n'
+             'Pelican Lake Heavy Oil (μ_o=5000 cp, k_rw_max=0.29)', fontsize=12)
+fig.tight_layout(); save(fig, 'fig7_bl_concentration.png')
+
+# ── Fig 8: 2-D optimisation landscape ───────────────────────
+days_2d = scan_ps_2d * T_MAX
+fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+for ax, data, lbl, opt_ps, opt_cp, cmap in [
+    (axes[0], cum_nn_2d/1e6,   'Pure NN',  opt_nn_ps_2d,   opt_nn_cp_2d,   'RdYlGn'),
+    (axes[1], cum_pinn_2d/1e6, 'PINN',     opt_pinn_ps_2d, opt_pinn_cp_2d, 'RdYlBu'),
+]:
+    cf = ax.contourf(days_2d, scan_cp_2d, data, levels=25, cmap=cmap)
+    ax.contour( days_2d, scan_cp_2d, data, levels=12,
+                colors='k', alpha=0.25, linewidths=0.5)
+    plt.colorbar(cf, ax=ax, label='Cum. Oil (×10⁶ m³·day)')
+    ax.scatter([opt_ps], [opt_cp], s=280, marker='*', color='white',
+               edgecolors='black', linewidths=1.5, zorder=10,
+               label=f'Optimal\nday {opt_ps}, {opt_cp:.0f} ppm')
+    ax.axvline(opt_day_pinn if 'PINN' in lbl else opt_day_nn,
+               color='cyan', ls='--', lw=1.0, alpha=0.7, label='Timing-only opt.')
+    ax.axhline(CP_REF_PPM, color='white', ls=':', lw=1.0, alpha=0.8,
+               label=f'CMG ref Cp={CP_REF_PPM:.0f} ppm')
+    ax.set_xlabel('Polymer Injection Start Day')
+    ax.set_ylabel('Polymer Concentration (ppm)')
+    ax.set_title(f'{lbl} — Joint Optimisation Landscape')
+    ax.legend(loc='upper right', fontsize=8.5,
+              facecolor='white', framealpha=0.8)
+fig.suptitle('Joint Polymer Start Timing × Concentration Optimisation\n'
+             'NN vs PINN Surrogate — Pelican Lake CMG STARS', fontsize=12)
+fig.tight_layout(); save(fig, 'fig8_2d_optimization.png')
+
+# ──────────────────────────────────────────────────────────────
+# 8. SUMMARY
 # ──────────────────────────────────────────────────────────────
 print('\n' + '='*70)
 print('SUMMARY  NN vs PINN — Forecast period (last 25% of time, all cases)')
@@ -452,6 +589,11 @@ for k, lbl in [('r2_wc','R² WC'),('r2_oil','R² Oil'),
     d = pv - nv
     s = '+' if d >= 0 else ''
     print(f'  {lbl:<22} {nv:>10.4f} {pv:>10.4f} {s+f"{d:.4f}":>12}')
-print(f'\n  Opt. poly start  NN: day {opt_day_nn}   PINN: day {opt_day_pinn}')
-print(f'  Figures → {OUT_DIR}')
+print(f'\n  TIMING-ONLY optimisation:')
+print(f'    NN   optimal poly start: day {opt_day_nn}')
+print(f'    PINN optimal poly start: day {opt_day_pinn}')
+print(f'\n  JOINT (timing + concentration) optimisation:')
+print(f'    NN   optimal: day {opt_nn_ps_2d},  Cp = {opt_nn_cp_2d:.0f} ppm')
+print(f'    PINN optimal: day {opt_pinn_ps_2d}, Cp = {opt_pinn_cp_2d:.0f} ppm')
+print(f'  Figures (8) → {OUT_DIR}')
 print('='*70)

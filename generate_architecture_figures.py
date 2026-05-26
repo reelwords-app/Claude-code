@@ -232,12 +232,12 @@ def make_fig10():
     ax.text(XL+BLW/2, PL_Y+PL_H-0.28, 'Physics Loss',
             ha='center', va='top', fontsize=11, fontweight='bold', color='#bf360c')
     for k,ln in enumerate([
-        r'$\mathcal{L}_P = \sum T_{w,i,j}[\hat{P}_j-\hat{P}_i]+\hat{q}_{w,i}'
-        r'-\frac{\partial}{\partial t}\!\left(\frac{V_{p,i}\hat{S}_{w,i}}{B_w}\right)$',
-        r'$+\sum T_{o,i,j}[\hat{P}_j-\hat{P}_i]+\hat{q}_{o,i}'
-        r'-\frac{\partial}{\partial t}\!\left(\frac{V_{p,i}(1-\hat{S}_{w,i})}{B_o}\right)$',
+        r'$\frac{\partial{\rm WC}}{\partial t}\geq 0,\quad'
+        r'\frac{\partial Q_{\rm oil}}{\partial t}\leq 0\quad(t>T_{\rm start})$',
+        r'$\mathcal{L}_P=\!\sum\!\left[\mathrm{ReLU}(-\Delta\widehat{{\rm WC}})^2'
+        r'+\mathrm{ReLU}(\Delta\hat{Q}_{\rm oil})^2\right]$',
         r'$\mathcal{L} = \mathcal{L}_D + \lambda\,\mathcal{L}_P$',
-        r'$\lambda(t)=\lambda_{\max}\!\cdot\!\min(1,\,t/t_{\rm warm})$',
+        r'$\lambda_{\max}=5\times10^{-4}$  (calibrated)',
     ]):
         ax.text(XL+BLW/2, PL_Y+PL_H-0.82-k*0.82,
                 ln, ha='center', va='top', fontsize=8.8, color='#bf360c')
@@ -308,7 +308,7 @@ def make_fig11():
     ax.add_patch(FancyBboxPatch((0.2,5.5),1.9,5.0,boxstyle='round,pad=0.12',
                  facecolor='#fff8e1',edgecolor='#f9a825',lw=1.8,zorder=2))
     for y,txt in [(10.2,'Physics\nConstraints'),(9.0,'WC monotone\ndWC/dt ≥ 0'),
-                  (7.7,'Oil decline\ndQ/dt ≤ 0'),(6.5,'λ warm-up\n0→0.10\nepoch 0–150')]:
+                  (7.7,'Oil decline\ndQ/dt ≤ 0'),(6.5,'λ warm-up\n0→5e-4\nepoch 0–150')]:
         fs = 9.5 if y==10.2 else (7.5 if y==6.5 else 8.5)
         fw = 'bold' if y==10.2 else 'normal'
         col = '#e65100' if y==10.2 else ('#bf360c' if y in [9.0,7.7] else '#555')
@@ -371,7 +371,7 @@ def make_fig12():
              'Data loss — MSE between predicted and CMG STARS rates'),
             (r'$\mathcal{L}_P = \sum\mathrm{ReLU}(-\Delta WC)^2'
              r'+ \sum\mathrm{ReLU}(\Delta Q_{oil})^2$',
-             'Physics loss — monotonicity: WC non-decreasing, oil non-increasing'),
+             r'Physics loss — monotonicity: WC non-decreasing, oil non-increasing post-injection'),
             (r'$\mathcal{L} = \mathcal{L}_D + \lambda(t)\cdot\mathcal{L}_P$',
              'Total loss with curriculum weight $\lambda(t)$'),
             (r'$\lambda(t) = \lambda_{\max}\cdot\min\!\left(1,\,\dfrac{t}{t_{\mathrm{warm}}}\right)'

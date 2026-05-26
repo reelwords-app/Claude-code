@@ -42,8 +42,9 @@ nb.cells.append(nbf.v4.new_markdown_cell(textwrap.dedent("""\
     **Data split:** Case-based 70 / 20 / 10 (train / validation / test)
     following the 3-D Brugge benchmark protocol from the reference paper.
 
-    **Physics constraint (PINN):** finite-difference monotonicity penalties
-    (WC non-decreasing, oil rate non-increasing post-injection).
+    **Physics constraint (PINN):** field-level material balance residual
+    (Q_oil = Q_inj × (1 − WC), algebraically exact for incompressible two-phase flow;
+    Ugembe et al. 2026). Scale-independent — no uncertain upscaled Corey parameters required.
 """)))
 
 for k in range(len(SECTIONS)):

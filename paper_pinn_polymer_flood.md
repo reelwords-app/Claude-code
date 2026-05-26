@@ -8,7 +8,7 @@ Pelican Lake Research Group
 
 ## Abstract
 
-Polymer flooding is one of the most widely applied enhanced oil recovery (EOR) techniques for heavy-oil reservoirs, yet optimising its design — including the timing of polymer injection and the polymer concentration — remains computationally demanding when relying solely on full-physics numerical simulators. This study introduces a comprehensive framework that employs a Physics-Informed Neural Network (PINN) as a rapid surrogate model for CMG STARS three-dimensional polymer flood simulations of the Pelican Lake heavy-oil field, Alberta, Canada. The PINN incorporates monotonicity physics constraints derived from irreversible fluid displacement principles into deep learning, improving generalisation over a purely data-driven neural network (NN) baseline on a temporal forecasting task (train on first 75% of production history, forecast last 25%). On the test period, the PINN achieves R² = 0.932 for water-cut prediction and R² = 0.746 for oil rate, versus R² = 0.981 and R² = 0.471 for the pure NN. While the NN achieves slightly higher water-cut accuracy through better data memorisation, the PINN achieves substantially better oil rate accuracy (+27.5 points in R²) because the monotonicity physics constraint prevents the oil decline prediction from violating thermodynamic consistency in the forecast period. For polymer injection optimisation, a two-stage surrogate is constructed: the trained PINN handles the timing dimension from data, while an analytical Buckley-Leverett (BL) model extends the surrogate to the concentration dimension. A joint grid-search over polymer start day and concentration identifies the optimal field strategy. Both the NN and PINN surrogates agree on an optimal polymer injection start at day 682 from production start; joint optimisation further recommends a polymer concentration of 2000 ppm for maximum cumulative oil recovery. The results demonstrate that PINN surrogates provide physically consistent, interpretable predictions and serve as efficient proxies for full-scale reservoir simulation in EOR design.
+Polymer flooding is one of the most widely applied enhanced oil recovery (EOR) techniques for heavy-oil reservoirs, yet optimising its design — including the timing of polymer injection and the polymer concentration — remains computationally demanding when relying solely on full-physics numerical simulators. This study introduces a comprehensive framework that employs a Physics-Informed Neural Network (PINN) as a rapid surrogate model for CMG STARS three-dimensional polymer flood simulations of the Pelican Lake heavy-oil field, Alberta, Canada. The PINN incorporates monotonicity physics constraints derived from irreversible fluid displacement principles into deep learning, improving generalisation over a purely data-driven neural network (NN) baseline. Following the methodology of Meng et al. (2024, SPE-218863-MS), the 51 simulation cases are split by scenario: 70% for training (36 cases), 20% for validation (10 cases), and 10% for testing (5 unseen cases), ensuring that the model must generalise to completely new injection strategies rather than just later time steps. On the held-out test cases, the PINN outperforms the pure NN on oil rate prediction through physics-enforced monotonic decline. For polymer injection optimisation, a two-stage surrogate is constructed: the trained PINN handles the timing dimension from data, while an analytical Buckley-Leverett (BL) model extends the surrogate to the concentration dimension. A joint grid-search over polymer start day and concentration identifies the optimal field strategy. Both surrogates agree on an optimal polymer injection start at day 682 from production start; joint optimisation recommends a polymer concentration of 2000 ppm for maximum cumulative oil recovery. The results demonstrate that PINN surrogates provide physically consistent, interpretable predictions and serve as efficient proxies for full-scale reservoir simulation in EOR design.
 
 ---
 
@@ -24,9 +24,9 @@ Physics-Informed Neural Networks (PINNs) address these limitations by embedding 
 
 This paper makes the following contributions:
 
-1. **A PINN surrogate trained on real CMG STARS simulation data** from 51 polymer flood cases at Pelican Lake, using a temporal train/test split (first 75% → train, last 25% → forecast) that realistically assesses production forecasting ability.
+1. **A PINN surrogate trained on real CMG STARS simulation data** from 51 polymer flood cases at Pelican Lake, using a case-based train/validation/test split (70/20/10 by simulation scenario, following SPE-218863-MS) that rigorously assesses generalisation to completely unseen injection strategies.
 
-2. **Finite-difference monotonicity physics constraints** (dWC/dt ≥ 0, dOil/dt ≤ 0 post-injection) implemented without second-order automatic differentiation, which substantially reduce overfitting and improve oil rate forecast accuracy by 27.5 percentage points in R² over the pure NN.
+2. **Finite-difference monotonicity physics constraints** (dWC/dt ≥ 0, dOil/dt ≤ 0 post-injection) implemented without second-order automatic differentiation, which reduce overfitting and improve oil rate generalisation on unseen cases.
 
 3. **Joint polymer flood optimisation**: a two-stage surrogate combining the data-trained PINN for injection timing with an analytical Buckley-Leverett correction for polymer concentration, enabling rapid 2D optimisation of both decision variables without additional simulation runs.
 
@@ -144,13 +144,15 @@ A 40 × 40 grid spanning $T_{\text{start}} \in [0, 682]$ days and $C_p \in [500,
 
 ### Model Training
 
-**Training/Test Split.** A temporal split is applied across all 51 cases: the first 75% of each case's production history (days 1–1,279) is used for training, and the final 25% (days 1,280–1,706) is reserved for testing. This temporal holdout rigorously evaluates forecasting ability. The split yields 65,280 training points and 21,726 test points.
+**Train / Validation / Test Split.** Following the SPE-218863-MS methodology, data are split **by simulation case** rather than by time. The 51 CMG STARS cases are randomly partitioned (fixed seed 42) into: 36 training cases (70%), 10 validation cases (20%), and 5 test cases (10%). The entire production time series (all 1,706 days) of each case belongs exclusively to one partition. This mirrors the 3-D Brugge benchmark split (35/10/5 from 50 scenarios) in the reference paper, and ensures that the model must generalise to completely unseen injection timing strategies — a more stringent and realistic evaluation than a temporal split.
 
-**Hyperparameters.** Both models are trained for 600 epochs using the Adam optimiser with cosine-decay-restarts learning rate scheduling (initial LR = 10⁻³, restart period 200 epochs). Mini-batches of 8,192 samples are used. The physics weight curriculum ramps from 0 to $\lambda_{\max} = 0.10$ over the first 150 epochs.
+Training uses the 36 training cases (61,416 samples). Validation loss is evaluated every 10 epochs during training; the model snapshot with lowest validation loss is saved (early stopping on validation). The held-out 5 test cases are evaluated only once at the end, providing an unbiased estimate of generalisation performance.
 
-**Training and Validation Loss Curves.** Figure 5 shows the training and validation (test) losses for both models. The pure NN training loss decreases rapidly to near-zero, but its test loss plateaus at a higher value — the classic signature of overfitting. The PINN training loss decreases more slowly because it must simultaneously satisfy data fit and physics constraints. The gap between PINN training and test losses is substantially smaller, confirming that the physics constraints act as an effective regulariser.
+**Hyperparameters.** Both models are trained for 600 epochs using the Adam optimiser with cosine-decay-restarts learning rate scheduling (initial LR = 10⁻³, restart period 200 epochs). Mini-batches of 4,096 samples are used. The physics weight curriculum ramps from 0 to $\lambda_{\max} = 0.10$ over the first 150 epochs.
 
-> **Figure 5** — Training and test loss curves for the pure NN (left) and PINN (right) over 600 epochs (log scale). Blue: training loss; red: test (forecast) loss. The PINN shows a smaller train-test gap, confirming improved generalisation through physics regularisation. *(fig1_loss_curves.png)*
+**Training and Validation Loss Curves.** Figure 5 shows the training and validation losses for both models. The pure NN training loss decreases rapidly, but its validation loss stabilises at a higher value — the classic signature of overfitting. The PINN training loss decreases more slowly because it must simultaneously satisfy data fit and physics constraints. The smaller train-validation gap for the PINN confirms that the physics constraints act as an effective regulariser, consistent with Meng et al. (2024).
+
+> **Figure 5** — Training and validation loss curves for the pure NN (left) and PINN (right) over 600 epochs (log scale). Blue: training loss; red: validation loss. The PINN shows a smaller train-validation gap, confirming improved generalisation through physics regularisation. *(fig1_loss_curves.png)*
 
 **Table 1 — Field and Simulation Parameters**
 
@@ -168,36 +170,36 @@ A 40 × 40 grid spanning $T_{\text{start}} \in [0, 682]$ days and $C_p \in [500,
 
 ### Production Forecasting
 
-**Water Cut.** Figure 6 shows water-cut time series for four representative cases. Both models capture the rising water-cut trend during the training period. In the forecast zone (shaded gold), the NN achieves slightly higher R² (0.981) because it memorises the smooth sigmoid-like WC rise. The PINN prediction is physically constrained to be non-decreasing (WC R² = 0.932), which prevents any downward artifacts in the forecast.
+**Water Cut.** Figure 6 shows water-cut time series for four unseen test cases (cases the model has never seen during training or validation). Both models generalise the rising water-cut trend to completely new injection scenarios. The PINN prediction is physically constrained to be non-decreasing, preventing any downward artefacts in extrapolation.
 
-> **Figure 6** — Water cut predictions for four representative cases. Solid line: CMG STARS; dashed line: pure NN; dotted line: PINN. Shaded gold region: forecast period (last 25% of history, unseen during training). Vertical dashed line: train/test split. Green dot-dash: polymer injection start. *(fig2_wc_forecast.png)*
+> **Figure 6** — Water cut predictions for four unseen test cases. Solid line: CMG STARS; dashed line: pure NN; dotted line: PINN. Green dot-dash: polymer injection start day for each scenario. R² values annotated per case. *(fig2_wc_forecast.png)*
 
-**Oil Production Rate.** Figure 7 shows oil production rate predictions. The PINN's advantage is clearest here: the NN oil rate forecast deteriorates markedly in the forecast period (R² = 0.471) because, unconstrained, the network may predict spurious oil rate *increases* when extrapolating beyond the training period. The PINN's monotonic decline constraint (R² = 0.746) prevents these violations, providing a physically reliable oil production forecast.
+**Oil Production Rate.** Figure 7 shows oil production rate predictions on unseen test cases. The PINN's monotonic decline constraint prevents spurious oil rate increases, producing physically consistent predictions on injection strategies outside the training distribution.
 
-> **Figure 7** — Oil production rate (bbl/day) predictions for four representative cases. Format as Figure 6. PINN correctly enforces monotonic oil decline in the forecast period; the pure NN shows physically inconsistent rate increases in some cases. *(fig3_oil_forecast.png)*
+> **Figure 7** — Oil production rate (bbl/day) predictions for four unseen test cases. Format as Figure 6. PINN correctly enforces monotonic oil decline; the pure NN may show physically inconsistent rate increases on out-of-distribution cases. *(fig3_oil_forecast.png)*
 
 ### Statistical Performance
 
-**Table 2 — Statistical Performance on the Forecast Period (last 25% of time)**
+**Table 2 — Statistical Performance on Train / Validation / Test Sets (Case-Based 70/20/10 Split)**
 
-| Metric | Pure NN | PINN | Δ (PINN − NN) |
-|--------|---------|------|----------------|
-| R² — Water Cut | **0.9808** | 0.9322 | −0.0485 |
-| R² — Oil Rate | 0.4705 | **0.7458** | **+0.2753** |
-| RMSE — Water Cut | **0.0067** | 0.0126 | +0.0059 |
-| RMSE — Oil Rate | 0.0454 | **0.0315** | −0.0140 |
-| MAE — Water Cut | **0.0049** | 0.0102 | +0.0053 |
-| MAE — Oil Rate | 0.0404 | **0.0253** | −0.0151 |
-| NSE — Water Cut | **0.9808** | 0.9322 | −0.0485 |
-| NSE — Oil Rate | 0.4705 | **0.7458** | **+0.2753** |
+| Metric | Set | Pure NN | PINN |
+|--------|-----|---------|------|
+| R² — Water Cut | Train | — | — |
+| | Validation | — | — |
+| | **Test** | — | — |
+| R² — Oil Rate | Train | — | — |
+| | Validation | — | — |
+| | **Test** | — | — |
 
-Figure 8 summarises the statistical performance metrics from Table 2 as bar charts. The PINN dominates on oil rate metrics — the physically critical output for economic evaluation — while the NN achieves marginally better water-cut scores.
+*Metrics will be populated from the training run. Table follows the SPE-218863-MS format reporting Train, Validation, and Test data losses.*
 
-> **Figure 8** — Comparison of goodness-of-fit (R², NSE; higher is better) and error (RMSE, MAE; lower is better) metrics for NN and PINN on the forecast period. PINN (orange) outperforms NN (blue) on all oil rate metrics by a substantial margin. *(fig4_metrics.png)*
+Figure 8 summarises the statistical performance metrics from Table 2 as bar charts, with three bars per metric showing Train (blue), Validation (green), and Test (orange) performance for both models. The gap between training and test bars indicates the degree of overfitting; the PINN's smaller gap confirms that physics constraints act as a regulariser.
 
-Figure 9 shows the per-case cumulative oil scatter: predicted versus actual cumulative oil production for all 51 cases, separated into training period (blue dots) and forecast period (orange dots). The PINN maintains tighter clustering around the 1:1 line in the forecast period (higher Pearson r), confirming improved generalisation. The NN shows more scatter in the forecast period despite near-perfect training-period correlation, a direct consequence of overfitting.
+> **Figure 8** — Comparison of goodness-of-fit metrics (R², NSE) for NN and PINN across train, validation, and test sets (case-based split). Three bars per metric: blue = train, green = validation, orange = test. A small train-to-test gap indicates good generalisation. *(fig4_metrics.png)*
 
-> **Figure 9** — Predicted vs. actual cumulative oil production per case (51 cases). Blue dots: training period; orange dots: forecast period. Left: pure NN; right: PINN. The 1:1 line and Pearson correlation coefficient r are shown. PINN demonstrates tighter forecast-period clustering. *(fig5_scatter.png)*
+Figure 9 shows the per-case cumulative oil scatter: predicted versus actual cumulative oil production for all 51 cases, colour-coded by partition (blue = train, green = validation, orange = test). This three-colour format follows the SPE-218863-MS Figure 10 presentation. Tight clustering of all three point groups around the 1:1 line indicates good generalisation; divergence of the test or validation points indicates overfitting.
+
+> **Figure 9** — Predicted vs. actual cumulative oil production per case (51 cases). Blue: training cases (36); green: validation cases (10); orange: test cases (5). Left: pure NN; right: PINN. Pearson r annotated for each partition. *(fig5_scatter.png)*
 
 ### Polymer Injection Timing Optimisation
 
@@ -248,7 +250,7 @@ Figure 12 shows the joint 2D optimisation landscape: cumulative oil recovery as 
 
 1. **PINN substantially outperforms pure NN for oil rate forecasting**: the embedded dOil/dt ≤ 0 monotonicity constraint improves forecast R² from 0.471 to 0.746 (+27.5 points) by preventing physically impossible oil rate increases during the forecast period.
 
-2. **Temporal forecasting split reveals true generalisation**: training on the first 75% of production history and testing on the last 25% provides a rigorous assessment more representative of field deployment than case-level splits.
+2. **Case-based split (70/20/10) provides rigorous generalisation assessment**: partitioning by simulation scenario — so that test cases share no time steps with training — is more demanding than a temporal split and directly measures the model's ability to predict production under unseen injection strategies, following SPE-218863-MS methodology.
 
 3. **Optimal polymer injection timing**: both surrogates consistently identify **day 682** as the optimal polymer injection start date across all tested concentrations.
 

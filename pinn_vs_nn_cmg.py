@@ -611,7 +611,7 @@ ax2.set_ylabel('Incremental Recovery over 1000 ppm (%)')
 ax2.set_title('Marginal Gain from Concentration Increase')
 ax2.grid(alpha=0.3)
 fig.suptitle('Buckley-Leverett Polymer Concentration Correction\n'
-             'Pelican Lake Heavy Oil (μ_o=5000 cp, k_rw_max=0.29)', fontsize=12)
+             'Pelican Lake Heavy Oil — RF ∝ μ_w(Cp)^0.35, ref: 1000 ppm', fontsize=12)
 fig.tight_layout(); save(fig, 'fig7_bl_concentration.png')
 
 # ── Fig 8: 2-D optimisation landscape ────────────────────────────────

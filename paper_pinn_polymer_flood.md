@@ -114,7 +114,7 @@ $$\text{Cum}_{\text{oil}}(T_{\text{start}}) = \int_0^{T_{\text{max}}} \hat{Q}_{\
 
 A dense grid of 80 start-day values spanning $[0,\, 0.4 \times T_{\text{max}}]$ is scanned; the optimal start day is the argmax of cumulative oil.
 
-**Stage 2 — Polymer Concentration Optimisation via Buckley-Leverett Physics.** All 51 CMG STARS cases were simulated at a fixed reference polymer concentration $C_{p,\text{ref}} = 1000$ ppm. To extend optimisation to the concentration dimension, an analytical Buckley-Leverett (BL) correction factor is derived.
+**Stage 2 — Polymer Concentration Optimisation via Buckley-Leverett Physics.** All 53 CMG STARS cases were simulated at a fixed reference polymer concentration $C_{p,\text{ref}} = 1000$ ppm. To extend optimisation to the concentration dimension, an analytical Buckley-Leverett (BL) correction factor is derived.
 
 For Pelican Lake heavy oil ($M \gg 1$ regime), the Craig-Geffen-Morse sweep efficiency gives:
 
@@ -146,9 +146,9 @@ Training uses the 37 training cases (63,122 samples). Validation loss is evaluat
 
 **Hyperparameters.** Both models are trained for 600 epochs using the Adam optimiser with cosine-decay-restarts learning rate scheduling (initial LR = 10⁻³, restart period 200 epochs). Mini-batches of 4,096 samples are used. The physics weight curriculum ramps from 0 to $\lambda_{\max} = 5 \times 10^{-3}$ over the first 150 epochs ($t_{\text{warm}} = 150$). Domain-wide collocation uses $N_\phi = 512$ points sampled uniformly from the full (t, T_start) input space per training step.
 
-**Training and Validation Loss Curves.** Figure 5 shows the training and validation losses for both models. The pure NN training loss decreases rapidly, but its validation loss stabilises at a higher value — the classic signature of overfitting. The PINN training loss decreases more slowly because it must simultaneously satisfy data fit and physics constraints. The smaller train-validation gap for the PINN confirms that the physics constraints act as an effective regulariser, consistent with Meng et al. (2024).
+**Training and Validation Loss Curves.** Figure 5 shows the training and validation losses for both models. Both the NN and PINN converge to near-identical training and validation losses by epoch 600 (train ≈ val ≈ 2×10⁻⁵ for NN; train ≈ 1×10⁻⁵, val ≈ 2×10⁻⁵ for PINN), indicating good generalisation with no visible overfitting gap for either model. The PINN's slightly lower training loss at convergence reflects the additional physics gradient signal from the WC monotonicity constraint.
 
-> **Figure 5** — Training and validation loss curves for the pure NN (left) and PINN (right) over 600 epochs (log scale). Blue: training loss; red: validation loss. The PINN shows a smaller train-validation gap, confirming improved generalisation through physics regularisation. *(fig1_loss_curves.png)*
+> **Figure 5** — Training and validation loss curves for the pure NN (left) and PINN (right) over 600 epochs (log scale). Blue: training loss; orange: validation loss. Both models converge without a meaningful train-validation gap. *(fig1_loss_curves.png)*
 
 **Table 1 — Field and Simulation Parameters**
 
@@ -170,9 +170,9 @@ Training uses the 37 training cases (63,122 samples). Validation loss is evaluat
 
 > **Figure 6** — Water cut predictions for four unseen test cases. Solid line: CMG STARS; dashed line: pure NN; dotted line: PINN. Green dot-dash: polymer injection start day for each scenario. R² values annotated per case. *(fig2_wc_forecast.png)*
 
-**Oil Production Rate.** Figure 7 shows oil production rate predictions on unseen test cases. The PINN's monotonic decline constraint prevents spurious oil rate increases, producing physically consistent predictions on injection strategies outside the training distribution.
+**Oil Production Rate.** Figure 7 shows oil production rate predictions on unseen test cases. Oil rate in this polymer flood model rises during active polymer injection (improved displacement sweep efficiency) before declining at late time — the WC monotonicity constraint does not directly constrain oil rate. Both models capture this characteristic hump-shaped profile. The PINN's slightly lower error metrics on oil rate (Table 2) reflect indirect regularisation: by constraining WC to be physically consistent across the full input domain, the PINN also produces more coherent oil rate predictions on unseen cases.
 
-> **Figure 7** — Oil production rate (bbl/day) predictions for four unseen test cases. Format as Figure 6. PINN correctly enforces monotonic oil decline; the pure NN may show physically inconsistent rate increases on out-of-distribution cases. *(fig3_oil_forecast.png)*
+> **Figure 7** — Oil production rate (bbl/day) predictions for four unseen test cases. Solid line: CMG STARS; dashed: pure NN; dotted: PINN. Both models reproduce the characteristic rise-then-decline oil rate profile driven by polymer sweep improvement. *(fig3_oil_forecast.png)*
 
 ### Statistical Performance
 
@@ -211,9 +211,9 @@ Figure 8 summarises the statistical performance metrics from Table 2 as bar char
 
 > **Figure 8** — Comparison of goodness-of-fit metrics (R², NSE) for NN and PINN across train, validation, and test sets (case-based split). Three bars per metric: blue = train, green = validation, orange = test. A small train-to-test gap indicates good generalisation. *(fig4_metrics.png)*
 
-Figure 9 shows the per-case cumulative oil scatter: predicted versus actual cumulative oil production for all 51 cases, colour-coded by partition (blue = train, green = validation, orange = test). This three-colour format follows the SPE-218863-MS Figure 10 presentation. Tight clustering of all three point groups around the 1:1 line indicates good generalisation; divergence of the test or validation points indicates overfitting.
+Figure 9 shows the per-case cumulative oil scatter: predicted versus actual cumulative oil production for all 53 cases, colour-coded by partition (blue = train, green = validation, orange = test). This three-colour format follows the SPE-218863-MS Figure 10 presentation. Tight clustering of all three point groups around the 1:1 line indicates good generalisation; divergence of the test or validation points indicates overfitting.
 
-> **Figure 9** — Predicted vs. actual cumulative oil production per case (51 cases). Blue: training cases (36); green: validation cases (10); orange: test cases (5). Left: pure NN; right: PINN. Pearson r annotated for each partition. *(fig5_scatter.png)*
+> **Figure 9** — Predicted vs. actual cumulative oil production per case (53 cases). Blue: training cases (37); green: validation cases (11); orange: test cases (5). Left: pure NN; right: PINN. Pearson r annotated for each partition. *(fig5_scatter.png)*
 
 ### Polymer Injection Timing Optimisation
 
@@ -223,7 +223,7 @@ Figure 10 shows cumulative oil production as a function of polymer injection sta
 
 ### Concentration Optimisation via Buckley-Leverett
 
-Figure 11 shows the BL-derived oil recovery factor as a function of polymer concentration. The reference concentration $C_{p,\text{ref}} = 1000$ ppm corresponds to RF/RF_ref = 1.0. Higher concentrations monotonically improve sweep efficiency under the Craig-Geffen-Morse $M \gg 1$ regime: at $C_p = 2000$ ppm, the strongly augmented polymer viscosity ($\mu_w = 3.4$ cp vs 1.8 cp at 1000 ppm) improves recovery by approximately 8%.
+Figure 11 shows the BL-derived oil recovery factor as a function of polymer concentration. The reference concentration $C_{p,\text{ref}} = 1000$ ppm corresponds to RF/RF_ref = 1.0 ($\mu_w = 2.0$ cp). Higher concentrations monotonically improve sweep efficiency under the Craig-Geffen-Morse $M \gg 1$ regime: at $C_p = 2000$ ppm, polymer viscosity increases to $\mu_w = 3.4$ cp, giving $\phi(2000) = (3.4/2.0)^{0.35} \approx 1.20$ — approximately 20% additional recovery relative to the 1000 ppm reference.
 
 > **Figure 11** — Oil recovery factor correction $\phi(C_p) = \text{RF}(C_p)/\text{RF}(C_{p,\text{ref}})$ as a function of polymer concentration, derived from the Craig-Geffen-Morse Buckley-Leverett model for heavy oil ($M \gg 1$ regime). Reference: $C_{p,\text{ref}} = 1000$ ppm. Recovery increases monotonically with concentration due to improved mobility control. *(fig7_bl_concentration.png)*
 
@@ -243,10 +243,12 @@ Figure 12 shows the joint 2D optimisation landscape: cumulative oil recovery as 
 
 **Table 3 — Joint Optimisation Results**
 
-| Surrogate | Optimal Start Day | Optimal Cp (ppm) | Predicted Cum. Oil Gain vs Baseline (%) |
-|-----------|------------------|-------------------|----------------------------------------|
-| Pure NN   | 682 | 2000 | +12.3 |
-| PINN      | 682 | 2000 | +10.8 |
+| Surrogate | Optimal Start Day | Optimal Cp (ppm) | BL concentration gain vs 1000 ppm ref. |
+|-----------|------------------|-------------------|-----------------------------------------|
+| Pure NN   | 682 | 2000 | +20.3% |
+| PINN      | 682 | 2000 | +20.3% |
+
+*BL gain = φ(2000) − 1 = (3.4/2.0)^{0.35} − 1 ≈ 0.203. Both surrogates recommend identical optimal parameters; the BL concentration correction is analytical and independent of the surrogate.*
 
 ---
 
@@ -268,7 +270,7 @@ Figure 12 shows the joint 2D optimisation landscape: cumulative oil recovery as 
 
 3. **Optimal polymer injection timing**: both surrogates consistently identify **day 682** as the optimal polymer injection start date across all tested concentrations.
 
-4. **Joint concentration-timing optimisation**: the two-stage surrogate combining PINN predictions with analytical BL corrections identifies the optimal strategy as day 682 start with $C_p \approx 1500$–$2000$ ppm, yielding approximately 8–12% incremental recovery over the reference scenario.
+4. **Joint concentration-timing optimisation**: the two-stage surrogate combining PINN predictions with analytical BL corrections identifies the optimal strategy as day 682 start with $C_p = 2000$ ppm. The BL correction alone yields approximately +20% additional cumulative oil recovery at 2000 ppm relative to the 1000 ppm reference ($\phi(2000) = (3.4/2.0)^{0.35} \approx 1.203$), on top of the timing-optimisation gain from scanning polymer start day.
 
 5. **Interpretability and reliability**: the PINN produces smoother, physically consistent optimisation landscapes, reducing the risk of pursuing spurious local optima from non-physical overfitting.
 

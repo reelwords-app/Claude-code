@@ -41,7 +41,7 @@ import warnings, os
 warnings.filterwarnings('ignore')
 tf.random.set_seed(42); np.random.seed(42)
 
-DATA_DIR = '/root/.claude/uploads/a0ab99c4-8c35-43d0-ac07-99aafbeb48c0/'
+DATA_DIR = '/root/.claude/uploads/1918eb38-7b5c-4ccb-8178-e0810c6fd119/'
 OUT_DIR  = '/home/user/Claude-code/pinn_cmg_results/'
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -54,15 +54,22 @@ def load_agg(path, fmt=None):
     df = df.dropna(subset=['_t'])
     return df.groupby('_t').mean(numeric_only=True)
 
-wc_agg = load_agg(DATA_DIR + '6514baa9-Water_cut.csv')
-op_agg = load_agg(DATA_DIR + '0e55865e-Oil_Production.csv')
-cp_agg = load_agg(DATA_DIR + '956b5b08-Polymer_concentration.csv')
-i1_agg = load_agg(DATA_DIR + '67422108-Injection_rate_inj1.csv', '%m/%d/%Y')
-i2_agg = load_agg(DATA_DIR + 'a9a336e4-Injection_rate_inj2.csv')
+wc_agg = load_agg(DATA_DIR + '38d2ce2c-Water_cut.csv')
+op_agg = load_agg(DATA_DIR + '984878da-Oil_Production.csv')
+cp_agg = load_agg(DATA_DIR + 'c5f11ca1-Polymer_concentration.csv')
+i1_agg = load_agg(DATA_DIR + '8462a815-Injection_rate_inj1.csv')
+i2_agg = load_agg(DATA_DIR + '20146134-Injection_rate_inj2.csv')
 
 def norm_cols(df):
-    m = {c: f'case_{c.split("_")[1].lstrip("0") or "0"}'
-         for c in df.columns if c.startswith('case_') and '_P' not in c}
+    """Normalise column names: case_01→case_1, case-46→case_46, case_2→case_2."""
+    def _fix(c):
+        if not c.startswith('case'):
+            return c
+        sep = '-' if c[4:5] == '-' else '_'
+        num = c.split(sep, 1)[1].lstrip('0') or '0'
+        return f'case_{num}'
+    m = {c: _fix(c) for c in df.columns
+         if c.startswith('case') and '_P' not in c}
     return df.rename(columns=m)
 
 wc_agg = norm_cols(wc_agg); op_agg = norm_cols(op_agg)
@@ -153,30 +160,39 @@ def build_model(name):
 # ──────────────────────────────────────────────────────────────
 EPOCHS    = 600
 BATCH     = 4096
-N_PHY     = 256
+N_PHY     = 512
 LR        = 1e-3
-W_PHY_MAX = 0.0005   # calibrated: L_P≈0.21, L_D≈0.00001 → ratio≈21,000; λ≈0.0005 gives ≈10× L_D
+W_PHY_MAX = 0.005    # domain-wide collocation: L_WC larger → calibrate to ~10× L_D
 WARMUP    = 150
 
 _rng = np.random.default_rng(0)
 
+# Pre-compute domain bounds for domain-wide collocation
+_PS_MAX = max(poly_starts.values())  # max polymer start (normalised)
+
 def physics_loss_fn(model, n=N_PHY):
-    """Monotonicity constraints from irreversibility of polymer flooding.
+    """WC monotonicity via domain-wide collocation (proper PINN methodology).
 
-    After polymer injection starts (t > T_start):
-      dWC/dt  >= 0  (water cut non-decreasing: irreversible displacement)
-      dQoil/dt <= 0  (oil rate non-increasing:  depletion decline)
+    Samples random (t, poly_start) pairs from the FULL input domain [0,1]×[0,PS_MAX],
+    forcing dWC/dt ≥ 0 for scenarios NOT seen during training (extrapolation regime).
+    This is the key difference vs. sampling from training data only.
 
-    Note: the field-level material balance Q_oil = Q_inj*(1-WC) was assessed
-    but found infeasible for this open-boundary CMG STARS model — the pressure-
-    driven simulation has Q_inj/[Q_oil/(1-WC)] ≈ 10.5 (not ≈ 1) due to
-    transient reservoir storage and non-closed boundaries.
+    Physics: Water saturation Sw can only increase as water is injected; WC = f(Sw)
+    is a non-decreasing function of time after polymer injection starts.
 
-    Finite-difference approximation over ε ≈ 34 days (0.02 normalised).
-    ReLU penalty activates only when constraint is violated.
+        dWC/dt >= 0   for all t > T_start
+
+    Collocation points: t ∈ U[0,1], poly_start ∈ U[0,PS_MAX], q_norm from data.
+    Finite-difference ε = 0.02 (≈ 34 days). ReLU penalty on violations only.
     """
-    idx    = _rng.integers(0, len(X_tr), n)
-    xc     = tf.constant(X_tr[idx], dtype=tf.float32)
+    # Sample random t and polymer start from full domain
+    t_rand  = _rng.uniform(0.0, 1.0, n).astype(np.float32)
+    ps_rand = _rng.uniform(0.0, _PS_MAX, n).astype(np.float32)
+    # Look up q_norm at the sampled t (nearest index)
+    t_idx_c = np.clip((t_rand * T_MAX).astype(int), 0, N_T - 1)
+    q_rand  = q_norm[t_idx_c]
+
+    xc     = tf.constant(np.column_stack([t_rand, ps_rand, q_rand]), dtype=tf.float32)
     eps    = 0.02
     t_next = tf.minimum(xc[:, :1] + eps, 1.0)
     xc2    = tf.concat([t_next, xc[:, 1:]], axis=1)
@@ -184,13 +200,10 @@ def physics_loss_fn(model, n=N_PHY):
     y1 = model(xc,  training=True)
     y2 = model(xc2, training=True)
 
-    dwc  = y2[:, 0] - y1[:, 0]   # WC change  (should be >= 0 post-injection)
-    doil = y2[:, 1] - y1[:, 1]   # Oil change (should be <= 0 post-injection)
-
+    dwc   = y2[:, 0] - y1[:, 0]          # WC change (should be >= 0)
     past  = tf.cast(xc[:, 0] > xc[:, 1], tf.float32)   # t > T_start
     L_wc  = tf.reduce_mean(past * tf.square(tf.nn.relu(-dwc)))
-    L_oil = tf.reduce_mean(past * tf.square(tf.nn.relu(doil)))
-    return L_wc + L_oil
+    return L_wc
 
 
 def train_model(model, is_pinn, label):
@@ -240,7 +253,7 @@ print('\n[TRAIN] Pure NN ...')
 nn   = build_model('nn')
 nn_tr, nn_va = train_model(nn, False, 'NN  ')
 
-print('\n[TRAIN] PINN (monotonicity physics, λ_max=5e-4) ...')
+print('\n[TRAIN] PINN (WC monotonicity, domain-wide collocation, λ_max=5e-3) ...')
 pinn = build_model('pinn')
 pn_tr, pn_va = train_model(pinn, True, 'PINN')
 

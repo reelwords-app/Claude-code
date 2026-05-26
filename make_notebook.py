@@ -42,9 +42,9 @@ nb.cells.append(nbf.v4.new_markdown_cell(textwrap.dedent("""\
     **Data split:** Case-based 70 / 20 / 10 (train / validation / test)
     following the 3-D Brugge benchmark protocol from the reference paper.
 
-    **Physics constraint (PINN):** field-level material balance residual
-    (Q_oil = Q_inj × (1 − WC), algebraically exact for incompressible two-phase flow;
-    Ugembe et al. 2026). Scale-independent — no uncertain upscaled Corey parameters required.
+    **Physics constraint (PINN):** WC monotonicity (dWC/dt ≥ 0 after polymer injection start),
+    enforced via domain-wide collocation over the full (t, T_start) space (Ugembe et al. 2026).
+    Thermodynamically valid — water saturation is irreversible once polymer flooding begins.
 """)))
 
 for k in range(len(SECTIONS)):

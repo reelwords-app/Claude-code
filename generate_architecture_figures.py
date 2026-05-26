@@ -308,7 +308,7 @@ def make_fig11():
     ax.add_patch(FancyBboxPatch((0.2,5.5),1.9,5.0,boxstyle='round,pad=0.12',
                  facecolor='#fff8e1',edgecolor='#f9a825',lw=1.8,zorder=2))
     for y,txt in [(10.2,'Physics\nConstraints'),(9.0,'WC monotone\ndWC/dt ≥ 0'),
-                  (7.7,'Oil decline\ndQ/dt ≤ 0'),(6.5,'λ warm-up\n0→5e-4\nepoch 0–150')]:
+                  (7.7,'Domain-wide\ncollocation'),(6.5,'λ warm-up\n0→5e-3\nepoch 0–150')]:
         fs = 9.5 if y==10.2 else (7.5 if y==6.5 else 8.5)
         fw = 'bold' if y==10.2 else 'normal'
         col = '#e65100' if y==10.2 else ('#bf360c' if y in [9.0,7.7] else '#555')
@@ -369,13 +369,13 @@ def make_fig12():
             (r'$\mathcal{L}_D = \dfrac{1}{nP}\sum_{i=1}^{nP}'
              r'\!\left[(q_{o,i}-\hat{q}_{o,i})^2+(q_{w,i}-\hat{q}_{w,i})^2\right]$',
              'Data loss — MSE between predicted and CMG STARS rates'),
-            (r'$\mathcal{L}_P = \sum\mathrm{ReLU}(-\Delta WC)^2'
-             r'+ \sum\mathrm{ReLU}(\Delta Q_{oil})^2$',
-             r'Physics loss — monotonicity: WC non-decreasing, oil non-increasing post-injection'),
+            (r'$\mathcal{L}_P = \dfrac{1}{N_\phi}\sum_{i=1}^{N_\phi}\mathbb{1}[t_i>T_{s,i}]'
+             r'\,\mathrm{ReLU}(-\Delta\widehat{\mathrm{WC}}_i)^2$',
+             r'Physics loss — WC monotonicity, domain-wide collocation ($N_\phi=512$)'),
             (r'$\mathcal{L} = \mathcal{L}_D + \lambda(t)\cdot\mathcal{L}_P$',
              'Total loss with curriculum weight $\lambda(t)$'),
             (r'$\lambda(t) = \lambda_{\max}\cdot\min\!\left(1,\,\dfrac{t}{t_{\mathrm{warm}}}\right)'
-             r'\quad [\lambda_{\max}=0.10,\;t_{\mathrm{warm}}=150]$',
+             r'\quad [\lambda_{\max}=5\times10^{-3},\;t_{\mathrm{warm}}=150]$',
              'Curriculum warmup schedule (ramps over first 150 epochs)'),
         ]),
         ('Joint Optimisation Objective', '#4e342e', '#efebe9', [
